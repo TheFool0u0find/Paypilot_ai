@@ -600,7 +600,7 @@ def analyze_requirements():
         except (TypeError, ValueError, InvalidOperation) as parse_error:
             return jsonify(error=str(parse_error)), 400
     except Exception:
-        app.logger.exception("OpenAI requirement analysis failed.")
+        app.logger.exception("OpenRouter requirement analysis failed.")
         return jsonify(error="AI analysis is temporarily unavailable. Try again or use the rule-based fallback."), 502
 
 
@@ -638,7 +638,7 @@ def explain_product():
     except RuntimeError as error:
         return jsonify(product={**product, "price": format_money(product_price(product))}, deterministic_match=match_details(product, fallback_requirements(data.get("request", ""))), explanation={"summary": "The deterministic match is shown above. AI explanation is unavailable.", "tradeoffs": [], "missing_information": ["AI explanation unavailable."]}, ai_used=False, fallback_message=str(error))
     except Exception:
-        app.logger.exception("OpenAI product explanation failed.")
+        app.logger.exception("OpenRouter product explanation failed.")
         return jsonify(error="The product explanation is temporarily unavailable."), 502
 
 
@@ -689,7 +689,7 @@ def evaluate_purchase():
             fallback_message=str(error),
         )
     except Exception:
-        app.logger.exception("OpenAI purchase evaluation failed.")
+        app.logger.exception("OpenRouter purchase evaluation failed.")
         return jsonify(error="The purchase evaluation is temporarily unavailable."), 502
 
 

@@ -28,6 +28,64 @@ class SmartCartApiTests(unittest.TestCase):
             },
         )
 
+    def test_ai_requirement_analysis_uses_openrouter_chat_completion(self):
+        response_message = type("Message", (), {
+            "content": '{"category":"keyboard","budget":{"amount":50,"currency":"USD"},"intended_use":"programming","required_features":["mechanical"],"preferred_features":[],"lower_priority_features":[],"expected_useful_lifetime":null,"clarifying_questions":[]}'
+        })()
+        fake_response = type("Response", (), {
+            "choices": [type("Choice", (), {"message": response_message})()]
+        })()
+        fake_client = type("Client", (), {
+            "chat": type("Chat", (), {
+                "completions": type("Completions", (), {
+                    "create": lambda *args, **kwargs: fake_response
+                })()
+            })()
+        })()
+        with patch.object(app, "OPENROUTER_API_KEY", "test-key"), patch.object(
+            app, "openrouter_client", return_value=fake_client
+        ):
+            response = self.client.post(
+                "/api/ai/analyze-requirements",
+                json={"request": "keyboard under $50 for programming"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["ai_used"])
+        self.assertEqual(
+            response.get_json()["requirements"]["category"], "keyboard"
+        )
+
+    def test_ai_fallback_is_labelled_when_openrouter_is_missing(self):
+        with patch.object(app, "openrouter_client", return_value=None):
+            response = self.client.post(
+                "/api/ai/analyze-requirements",
+                json={"request": "something fun under 100 rupees"},
+            )
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertFalse(data["ai_used"])
+        self.assertEqual(data["requirements"]["budget"]["currency"], "INR")
+
+    def test_ai_invalid_openrouter_output_uses_fallback(self):
+        response_message = type("Message", (), {"content": "not json"})()
+        fake_response = type("Response", (), {
+            "choices": [type("Choice", (), {"message": response_message})()]
+        })()
+        fake_client = type("Client", (), {
+            "chat": type("Chat", (), {
+                "completions": type("Completions", (), {
+                    "create": lambda *args, **kwargs: fake_response
+                })()
+            })()
+        })()
+        with patch.object(app, "openrouter_client", return_value=fake_client):
+            response = self.client.post(
+                "/api/ai/analyze-requirements",
+                json={"request": "keyboard under $50"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.get_json()["ai_used"])
+
     def test_catalogue_contains_server_controlled_products(self):
         response = self.client.get("/api/products")
         self.assertEqual(response.status_code, 200)
