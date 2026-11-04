@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PayPilot AI | Shop with confidence</title>
+    <style>
+        :root { --ink:#172554; --muted:#64748b; --primary:#4f46e5; --dark:#3730a3; --surface:#fff; --bg:#f8fafc; --border:#e2e8f0; --danger:#b91c1c; --success:#166534; }
+        * { box-sizing:border-box; }
+        body { margin:0; color:var(--ink); background:linear-gradient(135deg,#eef2ff,var(--bg) 45%); font-family:Inter,ui-sans-serif,system-ui,sans-serif; }
+        body.modal-open { overflow:hidden; }
+        header { padding:28px clamp(18px,5vw,72px); color:#fff; background:linear-gradient(120deg,#312e81,#4f46e5); }
+        .header-inner,.layout { width:min(1180px,100%); margin:auto; }
+        .brand { display:flex; align-items:center; gap:12px; }
+        .brand-mark { font-size:2rem; }
+        h1,h2,h3,p { margin-top:0; }
+        h1 { margin-bottom:6px; font-size:clamp(1.7rem,3vw,2.5rem); }
+        .tagline { color:#e0e7ff; }
+        .layout { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:28px; padding:34px 18px 60px; }
+        .section-heading { display:flex; justify-content:space-between; margin-bottom:18px; }
+        .catalogue { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:18px; }
+        .product-card,.panel { background:var(--surface); border:1px solid var(--border); border-radius:18px; box-shadow:0 12px 30px #1e1b4b0d; }
+        .product-card { overflow:hidden; display:flex; flex-direction:column; }
+        .product-image { width:100%; height:155px; object-fit:cover; background:#e0e7ff; }
+        .product-content { display:flex; flex:1; flex-direction:column; padding:18px; }
+        .category { width:fit-content; margin-bottom:10px; padding:4px 9px; border-radius:999px; color:var(--dark); background:#eef2ff; font-size:.75rem; font-weight:700; }
+        .description { min-height:42px; color:var(--muted); font-size:.9rem; line-height:1.45; }
+        .product-footer,.cart-item-head,.quantity-controls { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+        .product-footer { margin-top:auto; }
+        .price { font-size:1.15rem; font-weight:800; }
+        button { border:0; border-radius:10px; padding:10px 14px; color:#fff; background:var(--primary); font:inherit; font-weight:700; cursor:pointer; }
+        button:hover { background:var(--dark); } button.secondary { color:var(--ink); background:#e0e7ff; } button.danger { background:var(--danger); }
+        button:disabled { cursor:wait; opacity:.6; }
+        .panel { position:sticky; top:18px; height:fit-content; padding:22px; }
+        .cart-item { padding:14px 0; border-top:1px solid var(--border); } .cart-item:first-child { border-top:0; padding-top:0; }
+        .cart-item-name { font-weight:700; } .cart-item-price,.muted { color:var(--muted); font-size:.85rem; }
+        .quantity-controls { justify-content:flex-start; margin-top:10px; } .quantity-controls button { width:30px; height:30px; padding:0; }
+        .quantity { min-width:24px; text-align:center; font-weight:700; }
+        .remove-button { padding:3px 0; color:var(--danger); background:transparent; font-size:.8rem; }
+        .cart-total { display:flex; justify-content:space-between; margin:20px 0; padding-top:16px; border-top:2px solid var(--border); font-size:1.2rem; font-weight:800; }
+        #message { min-height:24px; color:var(--muted); line-height:1.45; } #message.success { color:var(--success); } #message.error { color:var(--danger); }
+        .empty,.loading { padding:18px 0; color:var(--muted); text-align:center; }
+        .modal-backdrop { position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center; padding:18px; background:#0f172acc; }
+        .modal-backdrop[hidden] { display:none; }
+        .modal { width:min(680px,100%); max-height:min(90vh,760px); overflow:auto; padding:26px; border-radius:20px; background:#fff; box-shadow:0 24px 80px #02061766; }
+        .modal-header { display:flex; justify-content:space-between; gap:16px; align-items:start; } .modal-header h2 { margin-bottom:4px; }
+        .close-button { padding:4px 10px; color:var(--ink); background:#e0e7ff; font-size:1.2rem; }
+        textarea,input { width:100%; padding:11px; border:1px solid var(--border); border-radius:10px; font:inherit; }
+        .modal-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:22px; }
+        .facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:16px 0; }
+        .fact { padding:12px; border-radius:12px; background:#f8fafc; } .fact strong { display:block; margin-top:4px; }
+        .warning { padding:12px; border-left:4px solid #f59e0b; background:#fffbeb; }
+        .loading-state { color:var(--muted); }
+        @media (max-width:800px) { .layout { grid-template-columns:1fr; } .panel { position:static; } .modal { padding:20px; } }
+    </style>
+</head>
+<body>
+    <header><div class="header-inner"><div class="brand"><span class="brand-mark" aria-hidden="true">🛍️</span><div><h1>PayPilot AI</h1><p class="tagline">Your needs. Your budget. A transparent shopping copilot.</p></div></div></div></header>
+    <main class="layout">
+        <section>
+            <div class="section-heading"><div><h2>Curated essentials</h2><p class="muted">Server-controlled demo catalogue with transparent matching.</p></div><button id="open-assistant" type="button">Ask PayPilot AI</button></div>
+            <div id="catalogue" class="catalogue"><p class="loading">Loading products...</p></div>
+        </section>
+        <aside class="panel" aria-labelledby="cart-title">
+            <h2 id="cart-title">Your cart <span id="cart-count" class="muted">0 items</span></h2>
+            <div id="cart-items"><p class="empty">Your cart is empty.</p></div>
+            <div class="cart-total"><span>Total</span><span id="cart-total">$0.00 USD</span></div>
+            {% if paypal_client_id %}<div id="paypal-button-container" hidden></div>{% else %}<p class="muted">PayPal is not configured.</p>{% endif %}
+            <p id="message" role="status" aria-live="polite">Ready to shop.</p>
+        </aside>
+    </main>
+
+    <div id="assistant-modal" class="modal-backdrop" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="assistant-title">
+        <div class="modal-header"><div><h2 id="assistant-title">AI Shopping Assistant</h2><p class="muted">Analysis uses OpenAI when configured; the fallback is clearly labelled.</p></div><button class="close-button" data-close-modal type="button" aria-label="Close">×</button></div>
+        <form id="request-form"><label for="shopping-request">What are you looking for?</label><textarea id="shopping-request" rows="4" placeholder="I need a keyboard under $50 for programming"></textarea><div class="modal-actions"><button type="submit">Analyze with AI</button></div></form>
+        <div id="analysis-result" hidden></div>
+        <div class="modal-actions"><button id="continue-recommendations" class="secondary" type="button" hidden>Continue to Recommendations</button></div>
+    </section></div>
+
+    <div id="product-modal" class="modal-backdrop" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="product-title">
+        <div class="modal-header"><div><h2 id="product-title">Recommendation details</h2><p id="product-subtitle" class="muted"></p></div><button class="close-button" data-close-modal type="button" aria-label="Close">×</button></div>
+        <div id="product-details"></div><div class="modal-actions"><button id="create-promise" type="button">Create Purchase Promise</button></div>
+    </section></div>
+
+    <div id="promise-modal" class="modal-backdrop" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="promise-title">
+        <div class="modal-header"><div><h2 id="promise-title">Purchase Promise</h2><p class="muted">Review the facts before approving checkout.</p></div><button class="close-button" data-close-modal type="button" aria-label="Close">×</button></div>
+        <div id="promise-details"></div><div class="modal-actions"><button class="secondary" data-close-modal type="button">Back to Product</button><button id="approve-promise" type="button">Approve and Continue to PayPal</button></div>
+    </section></div>
+
+    <div id="guardian-modal" class="modal-backdrop" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="guardian-title">
+        <div class="modal-header"><div><h2 id="guardian-title">Purchase Guardian</h2><p class="muted">No live monitoring provider is configured.</p></div><button class="close-button" data-close-modal type="button" aria-label="Close">×</button></div>
+        <div id="guardian-details"></div><div class="modal-actions"><button id="guardian-check" type="button">Check for Updates</button><button id="evaluate-purchase" type="button">Evaluate My Purchase</button></div>
+    </section></div>
+
+    <div id="evaluation-modal" class="modal-backdrop" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="evaluation-title">
+        <div class="modal-header"><div><h2 id="evaluation-title">Did This Purchase Still Make Sense?</h2></div><button class="close-button" data-close-modal type="button" aria-label="Close">×</button></div>
+        <div id="evaluation-details"></div>
+    </section></div>
+
+    {% if paypal_client_id %}<script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id|urlencode }}&currency=USD&intent=capture"></script>{% endif %}
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
