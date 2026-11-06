@@ -55,11 +55,26 @@ function closeModal(element) {
 }
 
 function productCard(product) {
+    const productId = product.product_id || product.id;
+    const image = product.image_url || product.image || "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22700%22 height=%22350%22%3E%3Crect width=%22700%22 height=%22350%22 fill=%22%23e0e7ff%22/%3E%3C/svg%3E";
+    const eligible = product.purchase_eligible === true;
+    const price = product.price == null ? "Price unavailable" : `$${product.price} ${product.currency || "USD"}`;
+    const rating = product.rating == null
+        ? "Rating unavailable"
+        : `Rating: ${product.rating} (${product.review_count ?? "review count unavailable"} reviews)`;
+    const source = product.source_type ? `<span class="muted">${sourceLabel(product.source_type)} · ${product.verification_status}</span>` : "";
+    const purchaseButton = eligible
+        ? `<button type="button" data-add-product="${productId}">Add to cart</button>`
+        : `<button type="button" disabled title="${product.purchase_disabled_reason || "This product cannot be purchased."}">Not purchasable</button>`;
     return `<article class="product-card">
-        <img class="product-image" src="${product.image}" alt="${product.name}" onerror="this.onerror=null;this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22700%22 height=%22350%22%3E%3Crect width=%22700%22 height=%22350%22 fill=%22%23e0e7ff%22/%3E%3C/svg%3E';">
+        <img class="product-image" src="${image}" alt="${product.name}" onerror="this.onerror=null;this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22700%22 height=%22350%22%3E%3Crect width=%22700%22 height=%22350%22 fill=%22%23e0e7ff%22/%3E%3C/svg%3E';">
         <div class="product-content"><span class="category">${product.category}</span><h3>${product.name}</h3>
-        <p class="description">${product.description}</p><div class="product-footer"><span class="price">$${product.price} USD</span>
-        <button type="button" data-product-id="${product.id}">View details</button></div></div></article>`;
+        <p class="description">${product.description || "Description unavailable."}</p><p class="muted">${eligible ? "✓ Verified product" : "Demo catalogue · not a real listing"} · ${source}<br>${rating}</p><div class="product-footer"><span class="price">${price}</span>
+        <button type="button" data-product-id="${productId}">View details</button>${purchaseButton}</div></div></article>`;
+}
+
+function sourceLabel(source) {
+    return source === "external_demo_api" ? "Fake Store API demo" : source.replaceAll("_", " ");
 }
 
 function renderProducts(products) {
@@ -67,11 +82,17 @@ function renderProducts(products) {
     catalogueElement.querySelectorAll("[data-product-id]").forEach(button => {
         button.addEventListener("click", () => selectProduct(button.dataset.productId));
     });
+    catalogueElement.querySelectorAll("[data-add-product]").forEach(button => {
+        button.addEventListener("click", () => changeCart("add", button.dataset.addProduct));
+    });
 }
 
 function renderCart(cart) {
     cartCountElement.textContent = `${cart.item_count} item${cart.item_count === 1 ? "" : "s"}`;
     cartTotalElement.textContent = `$${cart.total} ${cart.currency}`;
+    if (cart.over_budget) {
+        showMessage(`Cart total exceeds your saved budget of $${cart.budget.amount} ${cart.budget.currency}.`, "error");
+    }
     if (!cart.items.length) {
         cartItemsElement.innerHTML = '<p class="empty">Your cart is empty.</p>';
         if (paypalContainer) paypalContainer.hidden = true;
@@ -89,7 +110,14 @@ async function loadCart() { renderCart(await readResponse(await fetch("/api/cart
 
 async function changeCart(action, productId, quantity = 1) {
     try {
-        const response = await fetch("/api/cart", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({action, product_id:productId, quantity:Number(quantity)}) });
+        const response = await fetch("/api/cart", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({
+            action,
+            product_id:productId,
+            quantity:Number(quantity),
+            budget: currentRequirements?.budget?.currency === "USD"
+                ? currentRequirements.budget
+                : undefined,
+        }) });
         renderCart(await readResponse(response));
         showMessage(action === "add" ? "Added to your cart." : "Cart updated.", "success");
     } catch (error) { showMessage(error.message, "error"); }
@@ -107,7 +135,7 @@ async function analyzeRequest(event) {
     event.preventDefault();
     currentRequest = requestInput.value.trim();
     if (!currentRequest) { showMessage("Describe what you need first.", "error"); return; }
-    analysisResult.innerHTML = '<p class="loading-state">PayPilot is analyzing your request...</p>';
+    analysisResult.innerHTML = '<p class="loading-state">smartcart is analyzing your request...</p>';
     analysisResult.hidden = false;
     try {
         const result = await readResponse(await fetch("/api/ai/analyze-requirements", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({request:currentRequest}) }));
@@ -116,13 +144,54 @@ async function analyzeRequest(event) {
     } catch (error) { analysisResult.innerHTML = `<p class="warning">${error.message}</p>`; }
 }
 
+async function loadRecommendations() {
+    continueButton.disabled = true;
+    continueButton.textContent = "Loading recommendations...";
+    try {
+        const result = await readResponse(await fetch("/api/products/discover", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                request: currentRequest,
+                requirements: currentRequirements,
+            }),
+        }));
+        closeModal(modal("assistant-modal"));
+        if (!result.products.length) {
+            catalogueElement.innerHTML = `<p class="empty">No products in the demo catalogue match “${result.requirements.category || result.requirements.primary_use}”. Try a different category or request.</p>`;
+            showMessage("No matching products were found in the demo catalogue.", "error");
+            return;
+        }
+        renderProducts(result.products);
+        showMessage("Recommendations updated for your request.", "success");
+    } catch (error) {
+        showMessage(error.message, "error");
+    } finally {
+        continueButton.disabled = false;
+        continueButton.textContent = "Continue to Recommendations";
+    }
+}
+
 async function selectProduct(productId) {
     try {
+        if (productId.startsWith("synthetic-") || productId.startsWith("fake-store-")) {
+            const result = await readResponse(await fetch(`/api/products/${productId}`));
+            currentProduct = result;
+            const fakeStore = productId.startsWith("fake-store-");
+            productDetails.innerHTML = `${result.image_url ? `<img class="product-image" src="${result.image_url}" alt="${result.name}">` : ""}<h3>${result.name}</h3><p>${result.description || "Description unavailable."}</p><div class="warning">${fakeStore ? "Fake Store API demonstration product. This is not a real retailer listing and has no checkout link." : "Synthetic demonstration product. Price, seller, availability, specifications, and purchase link are unknown."} This item cannot be purchased.</div><p><strong>Price:</strong> ${result.price == null ? "Price unavailable" : `${result.price} ${result.currency || "currency unavailable"}`}</p><p><strong>Rating:</strong> ${result.rating == null ? "Unavailable" : `${result.rating} (${result.review_count ?? "review count unavailable"} reviews)`}</p>`;
+            document.getElementById("create-promise").hidden = true;
+            openModal("product-modal");
+            return;
+        }
         const result = await readResponse(await fetch("/api/ai/explain-product", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({product_id:productId, request:currentRequest, requirements:currentRequirements}) }));
         currentProduct = result.product;
+        document.getElementById("create-promise").hidden = false;
         productDetails.innerHTML = `<img class="product-image" src="${result.product.image}" alt="${result.product.name}"><div class="facts"><div class="fact">Price<strong>$${result.product.price} USD</strong></div><div class="fact">Match score<strong>${result.deterministic_match.match_score}</strong></div><div class="fact">Specs<strong>${Object.entries(result.product.specs).map(([key,value]) => `${key}: ${value}`).join(" · ")}</strong></div></div><p>${result.explanation.summary}</p><p><strong>Why:</strong> ${result.deterministic_match.reasons.join(" ") || "No verified match reason."}</p><p><strong>Trade-offs:</strong> ${result.explanation.tradeoffs.join(" ") || "None provided."}</p><div class="warning"><strong>Risks and unknowns:</strong> ${result.deterministic_match.risk_flags.join(" ")}</div>${result.ai_used ? "" : `<p class="muted">${result.fallback_message}</p>`}`;
         openModal("product-modal");
-    } catch (error) { showMessage(error.message, "error"); }
+    } catch (error) {
+        productDetails.innerHTML = `<p class="warning">${error.message}</p>`;
+        openModal("product-modal");
+    }
 }
 
 async function createPromise() {
@@ -176,7 +245,7 @@ modalIds.forEach(id => modal(id).addEventListener("click", event => { if (event.
 document.addEventListener("keydown", event => { if (event.key === "Escape") { const open = modalIds.find(id => !modal(id).hidden); if (open) closeModal(modal(open)); } });
 document.getElementById("open-assistant").addEventListener("click", () => openModal("assistant-modal"));
 requestForm.addEventListener("submit", analyzeRequest);
-continueButton.addEventListener("click", () => { closeModal(modal("assistant-modal")); showMessage("Choose a recommendation from the catalogue."); });
+continueButton.addEventListener("click", loadRecommendations);
 document.getElementById("create-promise").addEventListener("click", createPromise);
 document.getElementById("approve-promise").addEventListener("click", approvePromise);
 document.getElementById("guardian-check").addEventListener("click", guardianCheck);

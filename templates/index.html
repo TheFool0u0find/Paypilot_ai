@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PayPilot AI | Shop with confidence</title>
+    <title>smartcart | Shop with confidence</title>
     <style>
         :root { --ink:#172554; --muted:#64748b; --primary:#4f46e5; --dark:#3730a3; --surface:#fff; --bg:#f8fafc; --border:#e2e8f0; --danger:#b91c1c; --success:#166534; }
         * { box-sizing:border-box; }
@@ -37,6 +37,8 @@
         .quantity-controls { justify-content:flex-start; margin-top:10px; } .quantity-controls button { width:30px; height:30px; padding:0; }
         .quantity { min-width:24px; text-align:center; font-weight:700; }
         .remove-button { padding:3px 0; color:var(--danger); background:transparent; font-size:.8rem; }
+        .remove-button:hover,
+        .remove-button:focus-visible { color:#7f1d1d; background:transparent; }
         .cart-total { display:flex; justify-content:space-between; margin:20px 0; padding-top:16px; border-top:2px solid var(--border); font-size:1.2rem; font-weight:800; }
         #message { min-height:24px; color:var(--muted); line-height:1.45; } #message.success { color:var(--success); } #message.error { color:var(--danger); }
         .empty,.loading { padding:18px 0; color:var(--muted); text-align:center; }
@@ -55,10 +57,10 @@
     </style>
 </head>
 <body>
-    <header><div class="header-inner"><div class="brand"><span class="brand-mark" aria-hidden="true">🛍️</span><div><h1>PayPilot AI</h1><p class="tagline">Your needs. Your budget. A transparent shopping copilot.</p></div></div></div></header>
+    <header><div class="header-inner"><div class="brand"><span class="brand-mark" aria-hidden="true">🛍️</span><div><h1>smartcart</h1><p class="tagline">Your needs. Your budget. A transparent shopping copilot.</p></div></div></div></header>
     <main class="layout">
         <section>
-            <div class="section-heading"><div><h2>Curated essentials</h2><p class="muted">Server-controlled demo catalogue with transparent matching.</p></div><button id="open-assistant" type="button">Ask PayPilot AI</button></div>
+            <div class="section-heading"><div><h2>Curated essentials</h2><p class="muted">Server-controlled demo catalogue with transparent matching.</p></div><button id="open-assistant" type="button">Ask smartcart</button></div>
             <div id="catalogue" class="catalogue"><p class="loading">Loading products...</p></div>
         </section>
         <aside class="panel" aria-labelledby="cart-title">
@@ -98,6 +100,6 @@
     </section></div>
 
     {% if paypal_client_id %}<script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id|urlencode }}&currency=USD&intent=capture"></script>{% endif %}
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script src="{{ url_for('static', filename='app.js', v='4') }}"></script>
 </body>
 </html>

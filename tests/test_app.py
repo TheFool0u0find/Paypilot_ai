@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import patch
 
@@ -86,6 +87,100 @@ class SmartCartApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.get_json()["ai_used"])
 
+    def test_openrouter_client_reuses_proxy_safe_http_client(self):
+        created = []
+
+        def fake_openai(**kwargs):
+            created.append(kwargs)
+            return object()
+
+        with patch.object(app, "OpenAI", side_effect=fake_openai), patch.object(
+            app, "_openrouter_sdk_client", None
+        ):
+            first = app.openrouter_client()
+            second = app.openrouter_client()
+
+        self.assertIs(first, second)
+        self.assertEqual(len(created), 1)
+        self.assertFalse(created[0]["http_client"]._trust_env)
+        self.assertEqual(created[0]["base_url"], app.OPENROUTER_BASE_URL)
+
+    def test_all_ai_endpoints_preserve_deterministic_facts(self):
+        def fake_completion(*args, **kwargs):
+            schema = json.loads(kwargs["messages"][1]["content"])["schema"]
+            required = schema["required"]
+            values = {
+                "category": "keyboard",
+                "budget": {"amount": 80, "currency": "USD"},
+                "intended_use": "programming",
+                "required_features": [],
+                "preferred_features": [],
+                "lower_priority_features": [],
+                "expected_useful_lifetime": None,
+                "clarifying_questions": [],
+                "summary": "The product matches the recorded request.",
+                "tradeoffs": ["Live retailer information is unknown."],
+                "missing_information": ["Warranty"],
+                "assessment": "The recorded demo data supports the purchase.",
+                "facts": ["The server-controlled price is known."],
+                "unknowns": ["Warranty"],
+                "next_steps": ["Verify retailer information."],
+            }
+            content = json.dumps({key: values[key] for key in required})
+            message = type("Message", (), {"content": content})()
+            choice = type("Choice", (), {"message": message})()
+            return type("Response", (), {"choices": [choice]})()
+
+        fake_client = type(
+            "Client",
+            (),
+            {
+                "chat": type(
+                    "Chat",
+                    (),
+                    {
+                        "completions": type(
+                            "Completions",
+                            (),
+                            {"create": fake_completion},
+                        )()
+                    },
+                )()
+            },
+        )()
+        with patch.object(app, "openrouter_client", return_value=fake_client):
+            analysis = self.client.post(
+                "/api/ai/analyze-requirements",
+                json={"request": "keyboard under $80 for programming"},
+            )
+            explanation = self.client.post(
+                "/api/ai/explain-product",
+                json={
+                    "product_id": "keyboard",
+                    "requirements": {
+                        "budget": {"amount": 80, "currency": "USD"},
+                        "primary_use": "programming",
+                    },
+                },
+            )
+            promise = self.client.post(
+                "/api/promises",
+                json={
+                    "original_request": "keyboard under $80 for programming",
+                    "product_id": "keyboard",
+                },
+            ).get_json()
+            evaluation = self.client.post(
+                "/api/ai/evaluate-purchase",
+                json={"promise_id": promise["id"]},
+            )
+
+        self.assertTrue(analysis.get_json()["ai_used"])
+        self.assertTrue(explanation.get_json()["ai_used"])
+        self.assertEqual(explanation.get_json()["product"]["price"], "64.99")
+        self.assertEqual(explanation.get_json()["deterministic_match"]["match_score"], 85)
+        self.assertTrue(evaluation.get_json()["ai_used"])
+
     def test_catalogue_contains_server_controlled_products(self):
         response = self.client.get("/api/products")
         self.assertEqual(response.status_code, 200)
@@ -93,6 +188,159 @@ class SmartCartApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(products), 8)
         self.assertTrue(all(product["id"] in app.PRODUCTS for product in products))
         self.assertTrue(all(product["price"].count(".") == 1 for product in products))
+        self.assertTrue(all(product["purchase_eligible"] for product in products))
+
+    def test_synthetic_product_is_not_purchasable(self):
+        synthetic = {
+            "id": "synthetic-test",
+            "name": "Synthetic Test Product",
+            "description": "Demo only",
+            "category": "Test",
+            "price": None,
+            "available": True,
+            "specs": {},
+            "image": None,
+            "product_type": "synthetic",
+            "currency": None,
+            "seller": None,
+            "product_url": None,
+            "source_type": "synthetic_demo",
+            "verification_status": "synthetic_not_verified",
+        }
+        with patch.dict(app.PRODUCTS, {"synthetic-test": synthetic}):
+            response = self.add_product("synthetic-test")
+        self.assertEqual(response.status_code, 409)
+
+    def test_verified_product_without_purchase_url_is_rejected(self):
+        product = dict(app.PRODUCTS["keyboard"])
+        product["product_url"] = None
+        with patch.dict(app.PRODUCTS, {"no-url": {**product, "id": "no-url"}}):
+            response = self.add_product("no-url")
+        self.assertEqual(response.status_code, 409)
+
+    def test_cart_reports_and_rejects_budget_overage(self):
+        response = self.client.post(
+            "/api/cart",
+            json={
+                "action": "add",
+                "product_id": "keyboard",
+                "quantity": 1,
+                "budget": {"amount": "10.00", "currency": "USD"},
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["over_budget"])
+        checkout = self.client.post("/api/create-order")
+        self.assertEqual(checkout.status_code, 400)
+        self.assertIn("budget", checkout.get_json()["error"].lower())
+
+    def test_dynamic_discovery_returns_structured_handbag_products(self):
+        response = self.client.post(
+            "/api/products/discover",
+            json={"query": "I need a handbag under 500 USD for everyday use"},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["requirements"]["category"], "handbag")
+        self.assertTrue(data["products"])
+        self.assertTrue(all(product["source_type"] == "local_demo" for product in data["products"]))
+        self.assertTrue(all("product_id" in product for product in data["products"]))
+        self.assertTrue(all(product["price"] is not None for product in data["products"]))
+
+    def test_fake_store_products_are_mapped_as_non_purchasable_demo_data(self):
+        payload = [
+            {
+                "id": 1,
+                "title": "Demo Shirt",
+                "description": "A demo product.",
+                "category": "clothing",
+                "price": 12.5,
+                "image": "https://example.test/shirt.jpg",
+                "rating": {"rate": 4.2, "count": 10},
+            }
+        ]
+        fake_response = type(
+            "Response",
+            (),
+            {"raise_for_status": lambda self: None, "json": lambda self: payload},
+        )()
+        with patch.object(app, "_cached_fake_store_products", return_value=[]), patch.object(
+            app.requests, "get", return_value=fake_response
+        ):
+            response = self.client.get("/api/products/fake-store")
+        self.assertEqual(response.status_code, 200)
+        product = response.get_json()["products"][0]
+        self.assertEqual(product["source_type"], "external_demo_api")
+        self.assertEqual(product["verification_status"], "demo_catalogue")
+        self.assertIsNone(product["currency"])
+        self.assertEqual(product["rating"], 4.2)
+        self.assertFalse(product["purchase_eligible"])
+
+    def test_fake_store_uses_cache_when_api_fails(self):
+        cached = [{
+            "product_id": "fake-store-1",
+            "name": "Cached Demo",
+            "category": "clothing",
+            "description": "Cached",
+            "price": "12.50",
+            "currency": None,
+            "image_url": None,
+            "product_url": None,
+            "seller": None,
+            "specifications": {},
+            "features": [],
+            "source_type": "external_demo_api",
+            "verification_status": "demo_catalogue",
+            "discovered_at": "2020-01-01T00:00:00+00:00",
+        }]
+        with patch.object(app, "_cached_fake_store_products", return_value=cached), patch.object(
+            app.requests, "get", side_effect=app.requests.Timeout
+        ):
+            products = app.fake_store_products()
+        self.assertEqual(products[0]["name"], "Cached Demo")
+
+    def test_dynamic_discovery_labels_synthetic_products_and_prevents_duplicates(self):
+        requirements = {
+            "category": "camera",
+            "budget": {"amount": 500, "currency": "USD"},
+            "intended_use": "travel",
+            "required_features": [],
+            "preferred_features": [],
+            "missing_information": [],
+        }
+        concepts = {
+            "products": [
+                {
+                    "name": "Camera Demonstration Option",
+                    "category": "camera",
+                    "description": "Synthetic concept.",
+                    "features": [],
+                    "specifications": {},
+                }
+            ]
+        }
+        with patch.object(
+            app, "ai_json", side_effect=[requirements, concepts, requirements, concepts]
+        ):
+            first = self.client.post(
+                "/api/products/discover", json={"query": "camera under 500"}
+            )
+            second = self.client.post(
+                "/api/products/discover", json={"query": "camera under 500"}
+            )
+        self.assertEqual(first.status_code, 200)
+        product = first.get_json()["products"][0]
+        self.assertEqual(product["source_type"], "synthetic_demo")
+        self.assertEqual(product["verification_status"], "synthetic_not_verified")
+        self.assertIsNone(product["price"])
+        self.assertIsNone(product["product_url"])
+        self.assertEqual(second.status_code, 200)
+        with app.database() as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM discovered_products WHERE product_id = ?",
+                (product["product_id"],),
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
 
     def test_recommendations_and_purchase_promise(self):
         response = self.client.post(

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smartcart-ai"
+version = "0.1.0"
+description = "SmartCart shopping assistant"
+requires-python = ">=3.10"
+dependencies = [
+    "Flask",
+    "requests",
+    "python-dotenv",
+    "openai",
+    "httpx",
+]
+
+[tool.setuptools]
+py-modules = ["app"]
